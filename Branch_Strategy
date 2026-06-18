@@ -1,0 +1,15 @@
+main
+develop
+feature/dev-setup
+feature/frontend
+feature/backend
+feature/orchestrator
+feature/gpu-workers
+feature/infra
+feature/gitops
+feature/ci-cd
+feature/observability
+feature/video-sync
+feature/fade-engine
+release/v0.1.0
+hotfix/*

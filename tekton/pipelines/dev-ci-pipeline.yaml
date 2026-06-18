@@ -1,0 +1,14 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: versio-dev-ci
+spec:
+  workspaces:
+    - name: shared-workspace
+  tasks:
+    - name: backend-test
+      taskRef:
+        name: versio-backend-test
+      workspaces:
+        - name: source
+          workspace: shared-workspace

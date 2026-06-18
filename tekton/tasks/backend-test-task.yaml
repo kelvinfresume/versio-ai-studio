@@ -1,0 +1,15 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: versio-backend-test
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: install-and-test
+      image: python:3.12-slim
+      workingDir: $(workspaces.source.path)/backend/fastapi-api
+      script: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        python -m compileall app
