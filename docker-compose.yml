@@ -84,6 +84,17 @@ services:
       - versio_jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
 
+  frontend:
+    build:
+      context: ./frontend/nextjs-app
+    container_name: versio-dev-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+
 volumes:
   versio_postgres_data:
   versio_pgadmin_data:
