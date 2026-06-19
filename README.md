@@ -19,6 +19,22 @@ Current phase: **Dev Setup**
 - GitOps: ArgoCD
 - Observability: Prometheus, Grafana, Loki, OpenTelemetry
 
+## Local Tool Versions
+
+Current dev machine baseline:
+
+- Node.js: 26.3.0
+- npm: 11.17.0
+- Python: 3.14.6 local / 3.12 container runtime
+- AWS CLI: 2.35.8
+- kubectl: 1.36.2
+- Helm: 4.2.2
+- Terraform: 1.15.6
+- OpenTofu: 1.12.3
+- Trivy: 0.71.1
+- Checkov: 3.3.0
+- Docker Desktop: 4.78.0
+
 ## File Structure
 
 ```text
