@@ -3,8 +3,10 @@ import uuid
 from datetime import datetime
 
 import boto3
-from fastapi import FastAPI, File, Form, UploadFile
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -12,7 +14,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 app = FastAPI(
     title="Versio AI Studio API",
-    version="0.3.0-dev"
+    version="0.4.0-dev"
 )
 
 app.add_middleware(
@@ -81,6 +83,20 @@ def ensure_bucket(bucket_name: str) -> None:
         s3_client.create_bucket(Bucket=bucket_name)
 
 
+def serialize_project(project: Project) -> dict:
+    return {
+        "project_id": project.project_id,
+        "project_name": project.project_name,
+        "story_prompt": project.story_prompt,
+        "bucket": project.bucket,
+        "object_key": project.object_key,
+        "filename": project.filename,
+        "content_type": project.content_type,
+        "status": project.status,
+        "created_at": project.created_at.isoformat() + "Z"
+    }
+
+
 @app.get("/")
 def root():
     return {
@@ -102,7 +118,7 @@ def create_project(name: str):
     return {
         "message": "Project created",
         "project_name": name,
-        "version": "v0.3.0-dev"
+        "version": "v0.4.0-dev"
     }
 
 
@@ -111,20 +127,7 @@ def list_projects():
     db = SessionLocal()
     try:
         projects = db.query(Project).order_by(Project.created_at.desc()).all()
-        return [
-            {
-                "project_id": project.project_id,
-                "project_name": project.project_name,
-                "story_prompt": project.story_prompt,
-                "bucket": project.bucket,
-                "object_key": project.object_key,
-                "filename": project.filename,
-                "content_type": project.content_type,
-                "status": project.status,
-                "created_at": project.created_at.isoformat() + "Z"
-            }
-            for project in projects
-        ]
+        return [serialize_project(project) for project in projects]
     finally:
         db.close()
 
@@ -136,22 +139,39 @@ def get_project(project_id: str):
         project = db.query(Project).filter(Project.project_id == project_id).first()
 
         if not project:
-            return {
-                "status": "not_found",
-                "project_id": project_id
-            }
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        return {
-            "project_id": project.project_id,
-            "project_name": project.project_name,
-            "story_prompt": project.story_prompt,
-            "bucket": project.bucket,
-            "object_key": project.object_key,
-            "filename": project.filename,
-            "content_type": project.content_type,
-            "status": project.status,
-            "created_at": project.created_at.isoformat() + "Z"
-        }
+        return serialize_project(project)
+    finally:
+        db.close()
+
+
+@app.get("/projects/{project_id}/download")
+def download_project_audio(project_id: str):
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.project_id == project_id).first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        try:
+            response = s3_client.get_object(
+                Bucket=project.bucket,
+                Key=project.object_key
+            )
+        except ClientError:
+            raise HTTPException(status_code=404, detail="Audio file not found in object storage")
+
+        file_stream = response["Body"]
+
+        return StreamingResponse(
+            file_stream,
+            media_type=project.content_type or "application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{project.filename}"'
+            }
+        )
     finally:
         db.close()
 
@@ -166,6 +186,14 @@ async def upload_song(
 
     project_id = str(uuid.uuid4())
     original_filename = file.filename or "uploaded_audio.bin"
+
+    lower_filename = original_filename.lower()
+
+    if not lower_filename.endswith(".mp3") and not lower_filename.endswith(".wav"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only MP3 and WAV uploads are supported right now."
+        )
 
     if "." in original_filename:
         file_ext = original_filename.rsplit(".", 1)[1]
@@ -183,6 +211,8 @@ async def upload_song(
         }
     )
 
+    created_at = datetime.utcnow()
+
     db = SessionLocal()
     try:
         project = Project(
@@ -194,7 +224,7 @@ async def upload_song(
             filename=original_filename,
             content_type=file.content_type,
             status="uploaded",
-            created_at=datetime.utcnow()
+            created_at=created_at
         )
 
         db.add(project)
@@ -211,7 +241,8 @@ async def upload_song(
         "object_key": object_key,
         "filename": original_filename,
         "content_type": file.content_type,
-        "created_at": datetime.utcnow().isoformat() + "Z"
+        "created_at": created_at.isoformat() + "Z",
+        "download_url": "/projects/{}/download".format(project_id)
     }
 
 
