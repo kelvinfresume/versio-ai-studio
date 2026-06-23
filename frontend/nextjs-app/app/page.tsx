@@ -1,37 +1,450 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
+
+const API_BASE_URL = "http://localhost:8000";
+
+type Project = {
+  project_id: string;
+  project_name: string;
+  story_prompt: string;
+  bucket: string;
+  object_key: string;
+  filename: string;
+  content_type: string;
+  status: string;
+  created_at: string;
+};
+
+type StoryboardScene = {
+  storyboard_id?: string;
+  project_id?: string;
+  scene: number;
+  title: string;
+  visual: string;
+  camera: string;
+  emotion: string;
+  created_at?: string;
+};
+
+type StoryboardResponse = {
+  project_id?: string;
+  project_name: string;
+  status: string;
+  storyboard: StoryboardScene[];
+  audio_direction?: {
+    fade_out: string;
+    dialogue_insert: string;
+    fade_in: string;
+  };
+};
 
 export default function Home() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [apiStatus, setApiStatus] = useState("checking...");
+  const [projectName, setProjectName] = useState("");
+  const [storyPrompt, setStoryPrompt] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [lastResponse, setLastResponse] = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [storyboards, setStoryboards] = useState<Record<string, StoryboardResponse>>({});
+  const [isUploading, setIsUploading] = useState(false);
+  const [generatingProjectId, setGeneratingProjectId] = useState<string | null>(null);
+
+  async function fetchProjects() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects`);
+      const data = await res.json();
+      setProjects(Array.isArray(data) ? data : []);
+    } catch {
+      setProjects([]);
+    }
+  }
+
+  async function fetchStoryboard(project: Project) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects/${project.project_id}/storyboard`);
+      const data = await res.json();
+
+      if (data.storyboard && data.storyboard.length > 0) {
+        setStoryboards((prev) => ({
+          ...prev,
+          [project.project_id]: data,
+        }));
+      }
+    } catch {
+      return;
+    }
+  }
+
+  async function fetchExistingStoryboards(projectList: Project[]) {
+    for (const project of projectList) {
+      await fetchStoryboard(project);
+    }
+  }
 
   useEffect(() => {
-    fetch("http://localhost:8000/health")
+    fetch(`${API_BASE_URL}/health`)
       .then((res) => res.json())
       .then((data) => setApiStatus(data.status))
       .catch(() => setApiStatus("offline"));
+
+    fetch(`${API_BASE_URL}/projects`)
+      .then((res) => res.json())
+      .then(async (data) => {
+        const projectList = Array.isArray(data) ? data : [];
+        setProjects(projectList);
+        await fetchExistingStoryboards(projectList);
+      })
+      .catch(() => setProjects([]));
   }, []);
 
-  return (
-    <main className="min-h-screen bg-black text-white p-10">
-      <section className="max-w-3xl mx-auto space-y-6">
-        <h1 className="text-5xl font-bold">Versio AI Studio</h1>
-        <p className="text-lg text-gray-300">
-          Song-to-anime cinematic story generator.
-        </p>
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFile = e.target.files?.[0];
 
-        <div className="rounded-xl border border-gray-700 p-6">
-          <h2 className="text-2xl font-semibold mb-2">Backend Status</h2>
-          <p>API: <span className="font-bold">{apiStatus}</span></p>
+    if (!selectedFile) {
+      setFile(null);
+      return;
+    }
+
+    const lowerName = selectedFile.name.toLowerCase();
+    const isValidAudio =
+      lowerName.endsWith(".mp3") ||
+      lowerName.endsWith(".wav") ||
+      selectedFile.type === "audio/mpeg" ||
+      selectedFile.type === "audio/wav" ||
+      selectedFile.type === "audio/x-wav";
+
+    if (!isValidAudio) {
+      setFile(null);
+      setUploadStatus("Please select an MP3 or WAV file.");
+      return;
+    }
+
+    setFile(selectedFile);
+    setUploadStatus(`Selected file: ${selectedFile.name}`);
+  }
+
+  async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLastResponse("");
+
+    if (!projectName.trim()) {
+      setUploadStatus("Please add a project name.");
+      return;
+    }
+
+    if (!storyPrompt.trim()) {
+      setUploadStatus("Please add a story prompt.");
+      return;
+    }
+
+    if (!file) {
+      setUploadStatus("Please select an MP3 or WAV file.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("project_name", projectName.trim());
+    formData.append("story_prompt", storyPrompt.trim());
+    formData.append("file", file);
+
+    setIsUploading(true);
+    setUploadStatus("Uploading...");
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/uploads/song`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const text = await res.text();
+
+      if (!res.ok) {
+        setLastResponse(text);
+        throw new Error(text || "Upload failed");
+      }
+
+      const data = JSON.parse(text);
+      setLastResponse(JSON.stringify(data, null, 2));
+
+      setUploadStatus("Upload complete.");
+      setProjectName("");
+      setStoryPrompt("");
+      setFile(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      await fetchProjects();
+    } catch (error) {
+      setUploadStatus("Upload failed. Check backend logs or response below.");
+      if (error instanceof Error) {
+        setLastResponse(error.message);
+      }
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function generateStoryboard(project: Project) {
+    setGeneratingProjectId(project.project_id);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects/${project.project_id}/storyboard`, {
+        method: "POST",
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.detail || "Storyboard generation failed.");
+      }
+
+      setStoryboards((prev) => ({
+        ...prev,
+        [project.project_id]: data,
+      }));
+
+      await fetchProjects();
+    } catch {
+      alert("Storyboard generation failed.");
+    } finally {
+      setGeneratingProjectId(null);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#050505] text-white p-6 md:p-10">
+      <section className="max-w-6xl mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row md:items-center gap-6">
+          <Image
+            src="/versio-logo.svg"
+            alt="Versio AI Studio"
+            width={88}
+            height={88}
+            priority
+          />
+
+          <div>
+            <h1 className="text-4xl md:text-6xl font-bold bg-gradient-to-r from-purple-400 via-cyan-400 to-yellow-300 bg-clip-text text-transparent">
+              Versio AI Studio
+            </h1>
+
+            <p className="text-lg text-gray-300 mt-2">
+              AI Anime Cinema Engine
+            </p>
+
+            <p className="text-sm text-gray-500">
+              Transform music into cinematic anime experiences.
+            </p>
+          </div>
         </div>
 
-        <div className="rounded-xl border border-gray-700 p-6 space-y-4">
-          <h2 className="text-2xl font-semibold">Create Project</h2>
-          <input className="w-full rounded bg-gray-900 border border-gray-700 p-3" placeholder="Project name" />
-          <textarea className="w-full rounded bg-gray-900 border border-gray-700 p-3" placeholder="Describe the anime story..." />
-          <button className="rounded bg-white text-black px-5 py-3 font-semibold">
-            Generate Storyboard
+        <div className="rounded-2xl border border-purple-900/50 bg-gradient-to-r from-purple-950/40 to-cyan-950/20 p-6">
+          <h2 className="text-2xl font-bold mb-2">Developer Dashboard</h2>
+
+          <p className="text-gray-300">
+            Upload audio, persist assets in object storage, save metadata,
+            download original files, and generate persistent AI storyboards.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-gray-800 bg-gray-950/70 p-6">
+          <h2 className="text-2xl font-semibold mb-2">Backend Status</h2>
+          <p>
+            API:{" "}
+            <span
+              className={
+                apiStatus === "healthy"
+                  ? "font-bold text-green-400"
+                  : "font-bold text-red-400"
+              }
+            >
+              {apiStatus}
+            </span>
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleUpload}
+          className="rounded-xl border border-gray-800 bg-gray-950/70 p-6 space-y-4"
+        >
+          <h2 className="text-2xl font-semibold">Upload Song Project</h2>
+
+          <input
+            className="w-full rounded bg-black border border-gray-700 p-3 outline-none focus:border-cyan-400"
+            placeholder="Project name"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+          />
+
+          <textarea
+            className="w-full rounded bg-black border border-gray-700 p-3 min-h-28 outline-none focus:border-cyan-400"
+            placeholder="Describe the anime story..."
+            value={storyPrompt}
+            onChange={(e) => setStoryPrompt(e.target.value)}
+          />
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav"
+            className="w-full rounded bg-black border border-gray-700 p-3"
+            onChange={handleFileChange}
+          />
+
+          {file && (
+            <p className="text-sm text-green-400">
+              Ready to upload: {file.name} (
+              {Math.max(1, Math.round(file.size / 1024 / 1024))} MB)
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={isUploading}
+            className="rounded bg-white text-black px-5 py-3 font-semibold hover:bg-cyan-200 disabled:opacity-50"
+          >
+            {isUploading ? "Uploading..." : "🚀 Upload Project"}
           </button>
+
+          {uploadStatus && <p className="text-sm text-gray-300">{uploadStatus}</p>}
+
+          {lastResponse && (
+            <pre className="overflow-auto rounded bg-black border border-gray-800 p-4 text-xs text-gray-300">
+              {lastResponse}
+            </pre>
+          )}
+        </form>
+
+        <div className="rounded-xl border border-gray-800 bg-gray-950/70 p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-2xl font-semibold">Uploaded Projects</h2>
+
+            <button
+              onClick={async () => {
+                await fetchProjects();
+                await fetchExistingStoryboards(projects);
+              }}
+              className="rounded border border-gray-700 px-3 py-2 text-sm hover:border-cyan-400"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {projects.length === 0 ? (
+            <p className="text-gray-400">No projects uploaded yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {projects.map((project) => (
+                <div
+                  key={project.project_id}
+                  className="rounded-lg border border-gray-800 p-4 bg-black space-y-4"
+                >
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-cyan-300">
+                        {project.project_name}
+                      </h3>
+
+                      <p className="text-gray-300 mt-1">
+                        {project.story_prompt}
+                      </p>
+
+                      <p className="text-sm text-gray-400 mt-2">
+                        File: {project.filename}
+                      </p>
+
+                      <p className="text-sm text-gray-400">
+                        Status: {project.status}
+                      </p>
+
+                      <p className="text-sm text-gray-500 break-all">
+                        Object: {project.object_key}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <a
+                        href={`${API_BASE_URL}/projects/${project.project_id}/download`}
+                        className="inline-block rounded bg-white text-black px-4 py-2 text-sm font-semibold hover:bg-cyan-200 text-center"
+                      >
+                        ⬇️ Download Audio
+                      </a>
+
+                      <button
+                        onClick={() => generateStoryboard(project)}
+                        disabled={generatingProjectId === project.project_id}
+                        className="rounded bg-purple-500 text-white px-4 py-2 text-sm font-semibold hover:bg-purple-400 disabled:opacity-50"
+                      >
+                        {generatingProjectId === project.project_id
+                          ? "Generating..."
+                          : storyboards[project.project_id]
+                            ? "✅ Storyboard Saved"
+                            : "✨ Generate Storyboard"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {storyboards[project.project_id] && (
+                    <div className="rounded-lg border border-purple-900/50 bg-purple-950/20 p-4 space-y-3">
+                      <h4 className="text-lg font-bold text-purple-300">
+                        Persistent AI Storyboard
+                      </h4>
+
+                      {storyboards[project.project_id].storyboard.map((scene) => (
+                        <div
+                          key={`${project.project_id}-${scene.scene}`}
+                          className="rounded border border-gray-800 bg-black p-3"
+                        >
+                          <p className="font-semibold text-cyan-300">
+                            Scene {scene.scene}: {scene.title}
+                          </p>
+                          <p className="text-sm text-gray-300 mt-1">
+                            Visual: {scene.visual}
+                          </p>
+                          <p className="text-sm text-gray-400">
+                            Camera: {scene.camera}
+                          </p>
+                          <p className="text-sm text-gray-400">
+                            Emotion: {scene.emotion}
+                          </p>
+                        </div>
+                      ))}
+
+                      {storyboards[project.project_id].audio_direction && (
+                        <div className="rounded border border-yellow-900/50 bg-yellow-950/20 p-3">
+                          <p className="font-semibold text-yellow-300">
+                            Audio Direction
+                          </p>
+                          <p className="text-sm text-gray-300">
+                            Fade out:{" "}
+                            {storyboards[project.project_id].audio_direction?.fade_out}
+                          </p>
+                          <p className="text-sm text-gray-300">
+                            Dialogue:{" "}
+                            {
+                              storyboards[project.project_id].audio_direction
+                                ?.dialogue_insert
+                            }
+                          </p>
+                          <p className="text-sm text-gray-300">
+                            Fade in:{" "}
+                            {storyboards[project.project_id].audio_direction?.fade_in}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </main>
