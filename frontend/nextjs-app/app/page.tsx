@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
@@ -314,10 +315,17 @@ export default function Home() {
                 >
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>
-                      <h3 className="text-xl font-bold text-cyan-300">
-                        {project.project_name}
-                      </h3>
+                      <Link
 
+                        href={`/projects/${project.project_id}`}
+
+                        className="text-xl font-bold text-cyan-300 hover:text-cyan-200"
+
+                      >
+
+                        {project.project_name}
+
+                      </Link>
                       <p className="text-gray-300 mt-1">
                         {project.story_prompt}
                       </p>
@@ -352,6 +360,12 @@ export default function Home() {
                           ? "Generating..."
                           : "✨ Generate Storyboard"}
                       </button>
+                      <Link
+                        href={`/projects/${project.project_id}`}
+                        className="rounded border border-cyan-400 text-cyan-300 px-4 py-2 text-sm font-semibold text-center hover:bg-cyan-400 hover:text-black"
+                      >
+                        View Details
+                      </Link>
                     </div>
                   </div>
 
