@@ -1,10 +1,20 @@
-from fastapi import FastAPI
+import os
+import uuid
+from datetime import datetime
+
+import boto3
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import Column, DateTime, String, Text, create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 
 app = FastAPI(
     title="Versio AI Studio API",
-    version="0.1.0-dev"
+    version="0.4.0-dev"
 )
 
 app.add_middleware(
@@ -18,10 +28,74 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://versio:versio_dev_password@postgres:5432/versio_dev"
+)
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    project_id = Column(String, primary_key=True, index=True)
+    project_name = Column(String, nullable=False)
+    story_prompt = Column(Text, nullable=False)
+    bucket = Column(String, nullable=False)
+    object_key = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="uploaded")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+Base.metadata.create_all(bind=engine)
+
+
 class AITestRequest(BaseModel):
     project_name: str
     song_description: str
     story_prompt: str
+
+
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
+S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "versio")
+S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "versio_dev_password")
+S3_BUCKET_ASSETS = os.getenv("S3_BUCKET_ASSETS", "versio-dev-assets")
+
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=S3_ENDPOINT_URL,
+    aws_access_key_id=S3_ACCESS_KEY_ID,
+    aws_secret_access_key=S3_SECRET_ACCESS_KEY
+)
+
+
+def ensure_bucket(bucket_name: str) -> None:
+    response = s3_client.list_buckets()
+    bucket_names = [bucket.get("Name") for bucket in response.get("Buckets", [])]
+
+    if bucket_name not in bucket_names:
+        s3_client.create_bucket(Bucket=bucket_name)
+
+
+def serialize_project(project: Project) -> dict:
+    return {
+        "project_id": project.project_id,
+        "project_name": project.project_name,
+        "story_prompt": project.story_prompt,
+        "bucket": project.bucket,
+        "object_key": project.object_key,
+        "filename": project.filename,
+        "content_type": project.content_type,
+        "status": project.status,
+        "created_at": project.created_at.isoformat() + "Z"
+    }
+
 
 @app.get("/")
 def root():
@@ -31,19 +105,146 @@ def root():
         "status": "running"
     }
 
+
 @app.get("/health")
 def health():
     return {
         "status": "healthy"
     }
 
+
 @app.post("/projects")
 def create_project(name: str):
     return {
         "message": "Project created",
         "project_name": name,
-        "version": "v0.1.0-dev"
+        "version": "v0.4.0-dev"
     }
+
+
+@app.get("/projects")
+def list_projects():
+    db = SessionLocal()
+    try:
+        projects = db.query(Project).order_by(Project.created_at.desc()).all()
+        return [serialize_project(project) for project in projects]
+    finally:
+        db.close()
+
+
+@app.get("/projects/{project_id}")
+def get_project(project_id: str):
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.project_id == project_id).first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        return serialize_project(project)
+    finally:
+        db.close()
+
+
+@app.get("/projects/{project_id}/download")
+def download_project_audio(project_id: str):
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.project_id == project_id).first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        try:
+            response = s3_client.get_object(
+                Bucket=project.bucket,
+                Key=project.object_key
+            )
+        except ClientError:
+            raise HTTPException(status_code=404, detail="Audio file not found in object storage")
+
+        file_stream = response["Body"]
+
+        return StreamingResponse(
+            file_stream,
+            media_type=project.content_type or "application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{project.filename}"'
+            }
+        )
+    finally:
+        db.close()
+
+
+@app.post("/uploads/song")
+async def upload_song(
+    project_name: str = Form(...),
+    story_prompt: str = Form(...),
+    file: UploadFile = File(...)
+):
+    ensure_bucket(S3_BUCKET_ASSETS)
+
+    project_id = str(uuid.uuid4())
+    original_filename = file.filename or "uploaded_audio.bin"
+
+    lower_filename = original_filename.lower()
+
+    if not lower_filename.endswith(".mp3") and not lower_filename.endswith(".wav"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only MP3 and WAV uploads are supported right now."
+        )
+
+    if "." in original_filename:
+        file_ext = original_filename.rsplit(".", 1)[1]
+    else:
+        file_ext = "bin"
+
+    object_key = "projects/{}/audio/original.{}".format(project_id, file_ext)
+
+    s3_client.upload_fileobj(
+        file.file,
+        S3_BUCKET_ASSETS,
+        object_key,
+        ExtraArgs={
+            "ContentType": file.content_type or "application/octet-stream"
+        }
+    )
+
+    created_at = datetime.utcnow()
+
+    db = SessionLocal()
+    try:
+        project = Project(
+            project_id=project_id,
+            project_name=project_name,
+            story_prompt=story_prompt,
+            bucket=S3_BUCKET_ASSETS,
+            object_key=object_key,
+            filename=original_filename,
+            content_type=file.content_type,
+            status="uploaded",
+            created_at=created_at
+        )
+
+        db.add(project)
+        db.commit()
+    finally:
+        db.close()
+
+    return {
+        "status": "uploaded",
+        "project_id": project_id,
+        "project_name": project_name,
+        "story_prompt": story_prompt,
+        "bucket": S3_BUCKET_ASSETS,
+        "object_key": object_key,
+        "filename": original_filename,
+        "content_type": file.content_type,
+        "created_at": created_at.isoformat() + "Z",
+        "download_url": "/projects/{}/download".format(project_id)
+    }
+
 
 @app.post("/ai/test-generation")
 def test_ai_generation(request: AITestRequest):

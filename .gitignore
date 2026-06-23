@@ -21,3 +21,4 @@ terraform.tfstate.*
 .jenkins/
 kubeconfig*
 *.kubeconfig
+docs/*.mp3

@@ -7,3 +7,5 @@ psycopg2-binary
 redis
 boto3
 python-dotenv
+boto3
+python-dotenv
