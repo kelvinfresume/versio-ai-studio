@@ -17,6 +17,25 @@ type Project = {
   created_at: string;
 };
 
+type StoryboardScene = {
+  scene: number;
+  title: string;
+  visual: string;
+  camera: string;
+  emotion: string;
+};
+
+type StoryboardResponse = {
+  project_name: string;
+  status: string;
+  storyboard: StoryboardScene[];
+  audio_direction?: {
+    fade_out: string;
+    dialogue_insert: string;
+    fade_in: string;
+  };
+};
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -27,7 +46,9 @@ export default function Home() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [lastResponse, setLastResponse] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
+  const [storyboards, setStoryboards] = useState<Record<string, StoryboardResponse>>({});
   const [isUploading, setIsUploading] = useState(false);
+  const [generatingProjectId, setGeneratingProjectId] = useState<string | null>(null);
 
   async function fetchProjects() {
     try {
@@ -137,6 +158,35 @@ export default function Home() {
     }
   }
 
+  async function generateStoryboard(project: Project) {
+    setGeneratingProjectId(project.project_id);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/ai/test-generation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          project_name: project.project_name,
+          song_description: `Uploaded audio file: ${project.filename}`,
+          story_prompt: project.story_prompt,
+        }),
+      });
+
+      const data = await res.json();
+
+      setStoryboards((prev) => ({
+        ...prev,
+        [project.project_id]: data,
+      }));
+    } catch {
+      alert("Storyboard generation failed.");
+    } finally {
+      setGeneratingProjectId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#050505] text-white p-6 md:p-10">
       <section className="max-w-6xl mx-auto space-y-8">
@@ -165,37 +215,12 @@ export default function Home() {
         </div>
 
         <div className="rounded-2xl border border-purple-900/50 bg-gradient-to-r from-purple-950/40 to-cyan-950/20 p-6">
-          <h2 className="text-2xl font-bold mb-2">
-            Welcome to Versio
-          </h2>
+          <h2 className="text-2xl font-bold mb-2">Developer Dashboard</h2>
 
           <p className="text-gray-300">
-            Upload an MP3 or WAV file, store assets in object storage,
-            persist metadata in PostgreSQL, and prepare projects for AI
-            storyboard and anime video generation.
+            Upload audio, persist assets in object storage, save metadata,
+            download original files, and generate mock AI storyboards.
           </p>
-
-          <div className="mt-4 flex gap-3 flex-wrap">
-            <span className="px-3 py-1 rounded-full bg-purple-900/50 text-purple-300 text-sm">
-              FastAPI
-            </span>
-
-            <span className="px-3 py-1 rounded-full bg-blue-900/50 text-blue-300 text-sm">
-              PostgreSQL
-            </span>
-
-            <span className="px-3 py-1 rounded-full bg-green-900/50 text-green-300 text-sm">
-              MinIO
-            </span>
-
-            <span className="px-3 py-1 rounded-full bg-yellow-900/50 text-yellow-300 text-sm">
-              Vault
-            </span>
-
-            <span className="px-3 py-1 rounded-full bg-red-900/50 text-red-300 text-sm">
-              Jenkins
-            </span>
-          </div>
         </div>
 
         <div className="rounded-xl border border-gray-800 bg-gray-950/70 p-6">
@@ -257,9 +282,7 @@ export default function Home() {
             {isUploading ? "Uploading..." : "🚀 Upload Project"}
           </button>
 
-          {uploadStatus && (
-            <p className="text-sm text-gray-300">{uploadStatus}</p>
-          )}
+          {uploadStatus && <p className="text-sm text-gray-300">{uploadStatus}</p>}
 
           {lastResponse && (
             <pre className="overflow-auto rounded bg-black border border-gray-800 p-4 text-xs text-gray-300">
@@ -287,7 +310,7 @@ export default function Home() {
               {projects.map((project) => (
                 <div
                   key={project.project_id}
-                  className="rounded-lg border border-gray-800 p-4 bg-black"
+                  className="rounded-lg border border-gray-800 p-4 bg-black space-y-4"
                 >
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>
@@ -312,13 +335,76 @@ export default function Home() {
                       </p>
                     </div>
 
-                    <a
-                      href={`${API_BASE_URL}/projects/${project.project_id}/download`}
-                      className="inline-block rounded bg-white text-black px-4 py-2 text-sm font-semibold hover:bg-cyan-200"
-                    >
-                      ⬇️ Download Audio
-                    </a>
+                    <div className="flex flex-col gap-3">
+                      <a
+                        href={`${API_BASE_URL}/projects/${project.project_id}/download`}
+                        className="inline-block rounded bg-white text-black px-4 py-2 text-sm font-semibold hover:bg-cyan-200 text-center"
+                      >
+                        ⬇️ Download Audio
+                      </a>
+
+                      <button
+                        onClick={() => generateStoryboard(project)}
+                        disabled={generatingProjectId === project.project_id}
+                        className="rounded bg-purple-500 text-white px-4 py-2 text-sm font-semibold hover:bg-purple-400 disabled:opacity-50"
+                      >
+                        {generatingProjectId === project.project_id
+                          ? "Generating..."
+                          : "✨ Generate Storyboard"}
+                      </button>
+                    </div>
                   </div>
+
+                  {storyboards[project.project_id] && (
+                    <div className="rounded-lg border border-purple-900/50 bg-purple-950/20 p-4 space-y-3">
+                      <h4 className="text-lg font-bold text-purple-300">
+                        AI Storyboard
+                      </h4>
+
+                      {storyboards[project.project_id].storyboard.map((scene) => (
+                        <div
+                          key={scene.scene}
+                          className="rounded border border-gray-800 bg-black p-3"
+                        >
+                          <p className="font-semibold text-cyan-300">
+                            Scene {scene.scene}: {scene.title}
+                          </p>
+                          <p className="text-sm text-gray-300 mt-1">
+                            Visual: {scene.visual}
+                          </p>
+                          <p className="text-sm text-gray-400">
+                            Camera: {scene.camera}
+                          </p>
+                          <p className="text-sm text-gray-400">
+                            Emotion: {scene.emotion}
+                          </p>
+                        </div>
+                      ))}
+
+                      {storyboards[project.project_id].audio_direction && (
+                        <div className="rounded border border-yellow-900/50 bg-yellow-950/20 p-3">
+                          <p className="font-semibold text-yellow-300">
+                            Audio Direction
+                          </p>
+                          <p className="text-sm text-gray-300">
+                            Fade out:{" "}
+                            {storyboards[project.project_id].audio_direction?.fade_out}
+                          </p>
+                          <p className="text-sm text-gray-300">
+                            Dialogue:{" "}
+                            {
+                              storyboards[project.project_id].audio_direction
+                                ?.dialogue_insert
+                            }
+                          </p>
+                          <p className="text-sm text-gray-300">
+                            Fade in:{" "}
+                            {storyboards[project.project_id].audio_direction?.fade_in}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
