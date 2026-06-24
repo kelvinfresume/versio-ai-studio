@@ -22,33 +22,23 @@ URL:
 http://localhost:8200
 
 Authentication Method:
-
 Token
-
 Development Root Token:
-
 versio-dev-root-token
 
 ⸻
 
 Docker Service
-
 Vault runs as a local Docker Compose service.
-
 Verify Vault is running:
-
 docker compose ps vault
-
 View Vault logs:
-
 docker compose logs vault
 
 ⸻
 
 Development Warning
-
 This configuration uses Vault Dev Mode.
-
 Do NOT use the following in production:
 
 VAULT_DEV_ROOT_TOKEN_ID
@@ -77,11 +67,8 @@ secret/versio/dev/jenkins
 ⸻
 
 PostgreSQL Secret
-
 Vault Path:
-
 secret/versio/dev/postgres
-
 Stored Values:
 
 username=versio
@@ -93,11 +80,8 @@ port=5432
 ⸻
 
 MinIO Secret
-
 Vault Path:
-
 secret/versio/dev/minio
-
 Stored Values:
 
 access_key=versio
@@ -126,11 +110,8 @@ password=<stored in Vault or empty>
 Jenkins Secret
 
 Vault Path:
-
 secret/versio/dev/jenkins
-
 Stored Values:
-
 url=http://jenkins:8080
 host=jenkins
 port=8080
@@ -140,11 +121,8 @@ password=<stored in Vault>
 ⸻
 
 Accessing Vault
-
 Enter Vault container:
-
 docker compose exec vault sh
-
 Configure environment variables:
 
 export VAULT_ADDR=http://127.0.0.1:8200
@@ -153,27 +131,18 @@ export VAULT_TOKEN=versio-dev-root-token
 ⸻
 
 Read Secrets
-
 Read PostgreSQL secret:
-
 vault kv get secret/versio/dev/postgres
-
 Read MinIO secret:
-
 vault kv get secret/versio/dev/minio
-
 Read Redis secret:
-
 vault kv get secret/versio/dev/redis
-
 Read Jenkins secret:
-
 vault kv get secret/versio/dev/jenkins
 
 ⸻
 
 Future Enhancements
-
 Planned Vault integrations:
 
 * FastAPI secret retrieval
@@ -200,3 +169,53 @@ HashiCorp Vault
      └── Future AI/API Secrets
 
 Vault acts as the centralized source of truth for application secrets throughout the Versio AI Studio platform.
+
+# Vault Secrets
+
+## OpenAI
+
+secret/versio/dev/openai
+
+Fields:
+- api_key
+
+## PostgreSQL
+
+secret/versio/dev/postgres
+
+Fields:
+- username
+- password
+- database
+- host
+- port
+
+## Redis
+
+secret/versio/dev/redis
+
+Fields:
+- host
+- port
+- url
+- password
+
+## MinIO
+
+secret/versio/dev/minio
+
+Fields:
+- access_key
+- secret_key
+- endpoint
+- assets_bucket
+- exports_bucket
+
+## Jenkins
+
+secret/versio/dev/jenkins
+
+Fields:
+- url
+- username
+- password

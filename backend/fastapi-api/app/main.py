@@ -8,14 +8,18 @@ from botocore.exceptions import ClientError
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from openai import OpenAI
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
+# =====================================================
+# FastAPI App Configuration
+# =====================================================
 app = FastAPI(
     title="Versio AI Studio API",
-    version="0.6.0-dev"
+    version="0.7.0-dev"
 )
 
 app.add_middleware(
@@ -30,6 +34,11 @@ app.add_middleware(
 )
 
 
+# =====================================================
+# Database Configuration
+# PostgreSQL stores project metadata, storyboards,
+# and generated image metadata.
+# =====================================================
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://versio:versio_dev_password@postgres:5432/versio_dev"
@@ -40,6 +49,9 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
 
+# =====================================================
+# Database Models
+# =====================================================
 class Project(Base):
     __tablename__ = "projects"
 
@@ -83,12 +95,20 @@ class SceneImage(Base):
 Base.metadata.create_all(bind=engine)
 
 
+# =====================================================
+# Request Models
+# =====================================================
 class AITestRequest(BaseModel):
     project_name: str
     song_description: str
     story_prompt: str
 
 
+# =====================================================
+# Object Storage Configuration
+# MinIO is used locally. AWS S3 can replace it later
+# by changing environment variables only.
+# =====================================================
 S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
 S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "versio")
 S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "versio_dev_password")
@@ -102,6 +122,24 @@ s3_client = boto3.client(
 )
 
 
+# =====================================================
+# OpenAI Image Generation Configuration
+# IMAGE_GENERATION_MODE controls whether we use:
+# - mock: local placeholder PNG
+# - openai: OpenAI Image API
+# =====================================================
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+IMAGE_GENERATION_MODE = os.getenv("IMAGE_GENERATION_MODE", "mock")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")
+OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")
+
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+
+# =====================================================
+# Helpers
+# =====================================================
 def ensure_bucket(bucket_name: str) -> None:
     response = s3_client.list_buckets()
     bucket_names = [bucket.get("Name") for bucket in response.get("Buckets", [])]
@@ -151,6 +189,11 @@ def serialize_scene_image(image: SceneImage) -> dict:
     }
 
 
+# =====================================================
+# Mock Storyboard Generator
+# Temporary storyboard generator until real AI planning
+# is added.
+# =====================================================
 def mock_storyboard_scenes() -> list[dict]:
     return [
         {
@@ -184,11 +227,15 @@ def mock_storyboard_scenes() -> list[dict]:
     ]
 
 
+# =====================================================
+# Mock Image Fallback
+# Used when IMAGE_GENERATION_MODE is mock.
+# This keeps local development free and predictable.
+# =====================================================
 def placeholder_png_bytes() -> bytes:
     png_base64 = (
         "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAAA3NCSVQICAjb4U/g"
         "AAABJElEQVR4nO3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -200,20 +247,80 @@ def placeholder_png_bytes() -> bytes:
     return base64.b64decode(png_base64)
 
 
+# =====================================================
+# OpenAI Image Generator
+# Converts a storyboard scene prompt into image bytes.
+# Returned bytes are stored in MinIO/S3.
+# =====================================================
+def openai_image_bytes(prompt: str) -> bytes:
+    if not openai_client:
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not configured."
+        )
+
+    try:
+        response = openai_client.images.generate(
+            model=OPENAI_IMAGE_MODEL,
+            prompt=prompt,
+            size=OPENAI_IMAGE_SIZE,
+            quality=OPENAI_IMAGE_QUALITY,
+            n=1
+        )
+
+        image_base64 = response.data[0].b64_json
+
+        if not image_base64:
+            raise HTTPException(
+                status_code=500,
+                detail="OpenAI did not return base64 image data."
+            )
+
+        return base64.b64decode(image_base64)
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"OpenAI image generation failed: {str(exc)}"
+        )
+
+
+# =====================================================
+# Image Generation Router
+# Chooses mock or OpenAI based on IMAGE_GENERATION_MODE.
+# =====================================================
+def generate_image_bytes(prompt: str) -> bytes:
+    if IMAGE_GENERATION_MODE == "openai":
+        return openai_image_bytes(prompt)
+
+    return placeholder_png_bytes()
+
+
+# =====================================================
+# Health / Root
+# =====================================================
 @app.get("/")
 def root():
     return {
         "service": "versio-ai-studio-backend",
         "env": "dev",
-        "status": "running"
+        "status": "running",
+        "version": "0.7.0-dev",
+        "image_generation_mode": IMAGE_GENERATION_MODE
     }
 
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "image_generation_mode": IMAGE_GENERATION_MODE
+    }
 
 
+# =====================================================
+# Projects
+# =====================================================
 @app.get("/projects")
 def list_projects():
     db = SessionLocal()
@@ -238,6 +345,10 @@ def get_project(project_id: str):
         db.close()
 
 
+# =====================================================
+# Audio Download
+# Streams original uploaded MP3/WAV from MinIO.
+# =====================================================
 @app.get("/projects/{project_id}/download")
 def download_project_audio(project_id: str):
     db = SessionLocal()
@@ -266,6 +377,10 @@ def download_project_audio(project_id: str):
         db.close()
 
 
+# =====================================================
+# Upload Song
+# Stores audio in MinIO and metadata in PostgreSQL.
+# =====================================================
 @app.post("/uploads/song")
 async def upload_song(
     project_name: str = Form(...),
@@ -285,7 +400,7 @@ async def upload_song(
         )
 
     file_ext = original_filename.rsplit(".", 1)[1] if "." in original_filename else "bin"
-    object_key = "projects/{}/audio/original.{}".format(project_id, file_ext)
+    object_key = f"projects/{project_id}/audio/original.{file_ext}"
 
     s3_client.upload_fileobj(
         file.file,
@@ -327,10 +442,14 @@ async def upload_song(
         "filename": original_filename,
         "content_type": file.content_type,
         "created_at": created_at.isoformat() + "Z",
-        "download_url": "/projects/{}/download".format(project_id)
+        "download_url": f"/projects/{project_id}/download"
     }
 
 
+# =====================================================
+# Storyboard Generation
+# Saves storyboard scenes in PostgreSQL.
+# =====================================================
 @app.post("/projects/{project_id}/storyboard")
 def generate_and_save_storyboard(project_id: str):
     db = SessionLocal()
@@ -352,10 +471,9 @@ def generate_and_save_storyboard(project_id: str):
                 "storyboard": [serialize_storyboard_scene(scene) for scene in existing]
             }
 
-        generated_scenes = mock_storyboard_scenes()
         saved_scenes = []
 
-        for item in generated_scenes:
+        for item in mock_storyboard_scenes():
             scene = StoryboardScene(
                 storyboard_id=str(uuid.uuid4()),
                 project_id=project_id,
@@ -410,6 +528,11 @@ def get_project_storyboard(project_id: str):
         db.close()
 
 
+# =====================================================
+# Scene Image Generation
+# Creates images from storyboard scene prompts.
+# Stores image binaries in MinIO and metadata in PostgreSQL.
+# =====================================================
 @app.post("/projects/{project_id}/images")
 def generate_scene_images(project_id: str):
     ensure_bucket(S3_BUCKET_ASSETS)
@@ -448,12 +571,23 @@ def generate_scene_images(project_id: str):
         for scene in scenes:
             image_id = str(uuid.uuid4())
             object_key = f"projects/{project_id}/images/scene-{scene.scene_number}.png"
-            prompt = f"Cinematic anime frame. {scene.visual} Camera: {scene.camera}. Emotion: {scene.emotion}."
+
+            prompt = (
+                "Cinematic anime production still. "
+                f"Scene title: {scene.title}. "
+                f"Visual direction: {scene.visual}. "
+                f"Camera direction: {scene.camera}. "
+                f"Emotional tone: {scene.emotion}. "
+                "High detail, vibrant lighting, dramatic composition, "
+                "clean anime style, no text, no watermark."
+            )
+
+            image_bytes = generate_image_bytes(prompt)
 
             s3_client.put_object(
                 Bucket=S3_BUCKET_ASSETS,
                 Key=object_key,
-                Body=placeholder_png_bytes(),
+                Body=image_bytes,
                 ContentType="image/png"
             )
 
@@ -464,7 +598,7 @@ def generate_scene_images(project_id: str):
                 bucket=S3_BUCKET_ASSETS,
                 object_key=object_key,
                 prompt=prompt,
-                status="generated",
+                status="generated_openai" if IMAGE_GENERATION_MODE == "openai" else "generated_mock",
                 created_at=datetime.utcnow()
             )
 
@@ -478,6 +612,7 @@ def generate_scene_images(project_id: str):
             "project_id": project_id,
             "project_name": project.project_name,
             "status": "images_generated",
+            "image_generation_mode": IMAGE_GENERATION_MODE,
             "images": [serialize_scene_image(image) for image in saved_images]
         }
     finally:
@@ -538,6 +673,10 @@ def download_scene_image(project_id: str, image_id: str):
         db.close()
 
 
+# =====================================================
+# Legacy Mock AI Test Endpoint
+# Kept for quick API testing.
+# =====================================================
 @app.post("/ai/test-generation")
 def test_ai_generation(request: AITestRequest):
     return {
