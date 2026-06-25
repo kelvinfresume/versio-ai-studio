@@ -1,6 +1,7 @@
 import base64
 import os
 import uuid
+import hvac
 from datetime import datetime
 
 import boto3
@@ -122,19 +123,73 @@ s3_client = boto3.client(
 )
 
 
-# =====================================================
-# OpenAI Image Generation Configuration
-# IMAGE_GENERATION_MODE controls whether we use:
-# - mock: local placeholder PNG
-# - openai: OpenAI Image API
-# =====================================================
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-IMAGE_GENERATION_MODE = os.getenv("IMAGE_GENERATION_MODE", "mock")
-OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
-OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")
-OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")
+# ==========================================================
+# Vault Secret Loader
+# ==========================================================
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+VAULT_ADDR = os.getenv(
+    "VAULT_ADDR",
+    "http://vault:8200"
+)
+
+VAULT_TOKEN = os.getenv(
+    "VAULT_TOKEN",
+    "versio-dev-root-token"
+)
+
+
+def get_vault_secret(secret_path: str, field: str) -> str:
+    """
+    Read a single field from Vault KV v2.
+    """
+
+    client = hvac.Client(
+        url=VAULT_ADDR,
+        token=VAULT_TOKEN
+    )
+
+    secret = client.secrets.kv.v2.read_secret_version(
+        path=secret_path,
+        mount_point="secret"
+    )
+
+    return secret["data"]["data"][field]
+
+
+# ==========================================================
+# OpenAI Configuration
+# ==========================================================
+
+OPENAI_API_KEY = get_vault_secret(
+    "versio/dev/openai",
+    "api_key"
+)
+
+IMAGE_GENERATION_MODE = os.getenv(
+    "IMAGE_GENERATION_MODE",
+    "mock"
+)
+
+OPENAI_IMAGE_MODEL = os.getenv(
+    "OPENAI_IMAGE_MODEL",
+    "gpt-image-1"
+)
+
+OPENAI_IMAGE_SIZE = os.getenv(
+    "OPENAI_IMAGE_SIZE",
+    "1024x1024"
+)
+
+OPENAI_IMAGE_QUALITY = os.getenv(
+    "OPENAI_IMAGE_QUALITY",
+    "low"
+)
+
+openai_client = OpenAI(
+    api_key=OPENAI_API_KEY
+)
+
+print("✓ OpenAI key loaded from Vault")
 
 
 # =====================================================

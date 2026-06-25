@@ -6,7 +6,10 @@ sqlalchemy
 psycopg2-binary
 redis
 boto3
-python-dotenv
-boto3
+botocore
 python-dotenv
 openai
+hvac
+black
+isort
+ruff
