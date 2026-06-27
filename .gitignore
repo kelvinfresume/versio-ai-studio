@@ -1,24 +1,65 @@
+# ===========================
+# Environment
+# ===========================
 .env
 .env.*
+!.env.example
+
+# ===========================
+# Python
+# ===========================
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
+
+# ===========================
+# Node.js / Next.js
+# ===========================
 node_modules/
 .next/
 dist/
 build/
-venv/
-.venv/
+
+# ===========================
+# macOS
+# ===========================
 .DS_Store
+
+# ===========================
+# Generated Media
+# ===========================
 exports/
 storage/
+
 *.mp4
+*.mov
+
+# Ignore sample media except documentation samples
 *.mp3
 *.wav
-*.mov
+!docs/*.mp3
+!docs/*.wav
+
+# ===========================
+# Terraform
+# ===========================
 terraform.tfstate
 terraform.tfstate.*
 .terraform/
-.jenkins/
+
+# ===========================
+# Kubernetes
+# ===========================
 kubeconfig*
 *.kubeconfig
-docs/*.mp3
+
+# ===========================
+# Jenkins
+# ===========================
+.jenkins/
+
+# ===========================
+# Local Test Artifacts
+# ===========================
+test-scene.png
