@@ -1,0 +1,175 @@
+.
+├── .DS_Store
+├── .env.backup
+├── .github
+│   └── workflows
+│       └── dev-ci.yml
+├── .gitignore
+├── Branch_Strategy
+├── README.md
+├── backend
+│   └── fastapi-api
+│       ├── Dockerfile
+│       ├── app
+│       │   ├── main.py
+│       │   ├── models
+│       │   │   └── README.md
+│       │   ├── routers
+│       │   │   └── README.md
+│       │   ├── schemas
+│       │   │   └── README.md
+│       │   ├── services
+│       │   │   └── README.md
+│       │   └── utils
+│       │       └── README.md
+│       └── requirements.txt
+├── configs
+│   ├── README.md
+│   ├── grafana
+│   ├── loki
+│   ├── nginx
+│   ├── prometheus
+│   └── vault
+├── docker-compose.yml
+├── docs
+│   ├── architecture.md
+│   ├── ci-cd.md
+│   ├── commands.md
+│   ├── cost-awareness.md
+│   ├── credentials.md
+│   ├── current-file-structure.txt
+│   ├── database.md
+│   ├── development.md
+│   ├── fade-transition-engine.md
+│   ├── image-generation.md
+│   ├── not-a-song.txt
+│   ├── palava.mp3
+│   └── vault.md
+├── frontend
+│   └── nextjs-app
+│       ├── .gitignore
+│       ├── AGENTS.md
+│       ├── CLAUDE.md
+│       ├── Dockerfile
+│       ├── README.md
+│       ├── app
+│       │   ├── favicon.ico
+│       │   ├── globals.css
+│       │   ├── layout.tsx
+│       │   ├── page.tsx
+│       │   └── projects
+│       │       └── [project_id]
+│       ├── components
+│       │   └── README.md
+│       ├── eslint.config.mjs
+│       ├── hooks
+│       │   └── README.md
+│       ├── lib
+│       │   └── README.md
+│       ├── next-env.d.ts
+│       ├── next.config.ts
+│       ├── package-lock.json
+│       ├── package.json
+│       ├── postcss.config.mjs
+│       ├── public
+│       │   ├── file.svg
+│       │   ├── globe.svg
+│       │   ├── next.svg
+│       │   ├── vercel.svg
+│       │   ├── versio-logo.svg
+│       │   └── window.svg
+│       ├── services
+│       │   └── README.md
+│       ├── tsconfig.json
+│       ├── types
+│       │   └── README.md
+│       └── utils
+│           └── README.md
+├── gitops
+│   ├── README.md
+│   ├── argocd-apps
+│   │   └── README.md
+│   └── projects
+│       └── README.md
+├── infra
+│   ├── ansible
+│   │   ├── README.md
+│   │   ├── inventory
+│   │   │   ├── dev
+│   │   │   ├── prod
+│   │   │   └── staging
+│   │   ├── playbooks
+│   │   └── roles
+│   │       ├── docker
+│   │       ├── kubernetes
+│   │       ├── monitoring
+│   │       └── security
+│   ├── scripts
+│   └── terraform
+│       ├── README.md
+│       ├── envs
+│       │   ├── dev
+│       │   ├── prod
+│       │   └── staging
+│       └── modules
+│           ├── acm
+│           ├── cloudfront
+│           ├── ecr
+│           ├── eks
+│           ├── iam
+│           ├── monitoring
+│           ├── rds
+│           ├── redis
+│           ├── route53
+│           ├── s3
+│           └── vpc
+├── jenkins
+│   ├── Jenkinsfile.backend
+│   ├── Jenkinsfile.release
+│   └── Jenkinsfile.workers
+├── k8s
+│   ├── README.md
+│   ├── base
+│   └── overlays
+│       ├── dev
+│       ├── prod
+│       └── staging
+├── orchestrator
+│   ├── README.md
+│   ├── animation
+│   ├── beat_sync
+│   ├── character_memory
+│   ├── director
+│   ├── export_pipeline
+│   ├── fade_engine
+│   ├── lyric_analyzer
+│   ├── prompt_builder
+│   ├── scene_planner
+│   ├── timeline_builder
+│   └── transition_engine
+├── scripts
+│   ├── bootstrap-empty-structure.sh
+│   └── seed-vault-dev.sh
+├── tekton
+│   ├── README.md
+│   ├── pipelineruns
+│   │   └── dev-ci-run.yaml
+│   ├── pipelines
+│   │   └── dev-ci-pipeline.yaml
+│   ├── tasks
+│   │   └── backend-test-task.yaml
+│   └── triggers
+├── test-scene.png
+└── workers
+    ├── README.md
+    ├── beat-worker
+    ├── caption-worker
+    ├── export-worker
+    ├── ffmpeg-worker
+    ├── gpu-video-worker
+    ├── image-worker
+    ├── lip-sync-worker
+    ├── video-worker
+    └── whisper-worker
+
+98 directories, 75 files
