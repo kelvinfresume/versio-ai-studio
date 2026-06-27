@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# =====================================================
+# Load local environment values
+# =====================================================
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  source .env
+  set +a
+fi
+
+if [ -z "${VAULT_DEV_ROOT_TOKEN:-}" ]; then
+  echo "ERROR: VAULT_DEV_ROOT_TOKEN is missing from .env"
+  exit 1
 fi
 
 if [ -z "${OPENAI_API_KEY:-}" ]; then
@@ -10,11 +20,11 @@ if [ -z "${OPENAI_API_KEY:-}" ]; then
   exit 1
 fi
 
-echo "Seeding Vault dev secrets..."
+echo "Seeding persistent Vault secrets..."
 
 docker compose exec -T vault sh <<VAULT_CMDS
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=versio-dev-root-token
+export VAULT_TOKEN=${VAULT_DEV_ROOT_TOKEN}
 
 vault kv put secret/versio/dev/postgres \
   username=versio \
@@ -49,4 +59,4 @@ vault kv put secret/versio/dev/openai \
 vault kv list secret/versio/dev
 VAULT_CMDS
 
-echo "Vault dev secrets restored."
+echo "Vault secrets seeded."
