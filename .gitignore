@@ -63,3 +63,9 @@ kubeconfig*
 # Local Test Artifacts
 # ===========================
 test-scene.png
+
+# ===========================
+# Vault mount shell script
+# ===========================
+scripts/seed-vault-dev.sh
+scripts/local/
