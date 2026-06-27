@@ -38,8 +38,8 @@ storage/
 # Ignore sample media except documentation samples
 *.mp3
 *.wav
-!docs/*.mp3
-!docs/*.wav
+!audio/*.mp3
+!audio/*.wav
 
 # ===========================
 # Terraform
