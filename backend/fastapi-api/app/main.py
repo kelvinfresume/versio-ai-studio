@@ -1,34 +1,30 @@
 import base64
+import json
 import os
 import uuid
-import hvac
 from datetime import datetime
 
 import boto3
+import hvac
+from app.services.ai_director import generate_ai_director_storyboard
 from botocore.exceptions import ClientError
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import (Column, DateTime, ForeignKey, Integer, String, Text,
+                        create_engine)
 from sqlalchemy.orm import declarative_base, sessionmaker
-
 
 # =====================================================
 # FastAPI App Configuration
 # =====================================================
-app = FastAPI(
-    title="Versio AI Studio API",
-    version="0.7.0-dev"
-)
+app = FastAPI(title="Versio AI Studio API", version="0.9.0-dev")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,18 +32,119 @@ app.add_middleware(
 
 
 # =====================================================
-# Database Configuration
-# PostgreSQL stores project metadata, storyboards,
-# and generated image metadata.
+# Vault Configuration
+# Vault is the source of truth for local dev secrets.
 # =====================================================
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://versio:versio_dev_password@postgres:5432/versio_dev"
+VAULT_ADDR = os.getenv("VAULT_ADDR", "http://vault:8200")
+VAULT_TOKEN = os.getenv("VAULT_TOKEN", "")
+
+
+def get_vault_client() -> hvac.Client:
+    client = hvac.Client(url=VAULT_ADDR, token=VAULT_TOKEN)
+
+    if not client.is_authenticated():
+        raise RuntimeError(
+            "Vault authentication failed. Check VAULT_TOKEN and Vault status."
+        )
+
+    return client
+
+
+def get_vault_secret(secret_path: str, field: str) -> str:
+    """
+    Read a single field from Vault KV v2.
+    """
+
+    client = get_vault_client()
+
+    secret = client.secrets.kv.v2.read_secret_version(
+        path=secret_path,
+        mount_point="secret",
+    )
+
+    return secret["data"]["data"][field]
+
+
+def get_vault_secret_map(secret_path: str) -> dict:
+    """
+    Read an entire Vault KV v2 secret as a dictionary.
+    """
+
+    client = get_vault_client()
+
+    secret = client.secrets.kv.v2.read_secret_version(
+        path=secret_path,
+        mount_point="secret",
+    )
+
+    return secret["data"]["data"]
+
+
+# =====================================================
+# Load Secrets From Vault
+# =====================================================
+postgres_secret = get_vault_secret_map("versio/dev/postgres")
+minio_secret = get_vault_secret_map("versio/dev/minio")
+redis_secret = get_vault_secret_map("versio/dev/redis")
+OPENAI_API_KEY = get_vault_secret("versio/dev/openai", "api_key")
+
+print("✓ Backend secrets loaded from Vault")
+
+
+# =====================================================
+# Database Configuration
+# =====================================================
+DATABASE_URL = (
+    f"postgresql://{postgres_secret['username']}:{postgres_secret['password']}"
+    f"@{postgres_secret['host']}:{postgres_secret['port']}/{postgres_secret['database']}"
 )
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
+
+
+# =====================================================
+# Object Storage Configuration
+# =====================================================
+S3_ENDPOINT_URL = minio_secret["endpoint"]
+S3_ACCESS_KEY_ID = minio_secret["access_key"]
+S3_SECRET_ACCESS_KEY = minio_secret["secret_key"]
+S3_BUCKET_ASSETS = minio_secret["assets_bucket"]
+S3_BUCKET_EXPORTS = minio_secret["exports_bucket"]
+
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=S3_ENDPOINT_URL,
+    aws_access_key_id=S3_ACCESS_KEY_ID,
+    aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+)
+
+
+# =====================================================
+# Redis Configuration
+# Loaded now for future worker queue usage.
+# =====================================================
+REDIS_URL = redis_secret["url"]
+
+
+# =====================================================
+# OpenAI / AI Director Configuration
+# =====================================================
+IMAGE_GENERATION_MODE = os.getenv("IMAGE_GENERATION_MODE", "mock")
+AI_DIRECTOR_MODE = os.getenv("AI_DIRECTOR_MODE", "mock")
+AI_DIRECTOR_FALLBACK_TO_MOCK = (
+    os.getenv("AI_DIRECTOR_FALLBACK_TO_MOCK", "true").lower() == "true"
+)
+
+OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-5.5")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")
+OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")
+
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+print("✓ OpenAI key loaded from Vault")
 
 
 # =====================================================
@@ -71,7 +168,9 @@ class StoryboardScene(Base):
     __tablename__ = "storyboards"
 
     storyboard_id = Column(String, primary_key=True, index=True)
-    project_id = Column(String, ForeignKey("projects.project_id"), nullable=False, index=True)
+    project_id = Column(
+        String, ForeignKey("projects.project_id"), nullable=False, index=True
+    )
     scene_number = Column(Integer, nullable=False)
     title = Column(String, nullable=False)
     visual = Column(Text, nullable=False)
@@ -84,7 +183,9 @@ class SceneImage(Base):
     __tablename__ = "scene_images"
 
     image_id = Column(String, primary_key=True, index=True)
-    project_id = Column(String, ForeignKey("projects.project_id"), nullable=False, index=True)
+    project_id = Column(
+        String, ForeignKey("projects.project_id"), nullable=False, index=True
+    )
     scene_number = Column(Integer, nullable=False)
     bucket = Column(String, nullable=False)
     object_key = Column(String, nullable=False)
@@ -106,103 +207,8 @@ class AITestRequest(BaseModel):
 
 
 # =====================================================
-# Object Storage Configuration
-# MinIO is used locally. AWS S3 can replace it later
-# by changing environment variables only.
+# Serialization Helpers
 # =====================================================
-S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
-S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "versio")
-S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "versio_dev_password")
-S3_BUCKET_ASSETS = os.getenv("S3_BUCKET_ASSETS", "versio-dev-assets")
-
-s3_client = boto3.client(
-    "s3",
-    endpoint_url=S3_ENDPOINT_URL,
-    aws_access_key_id=S3_ACCESS_KEY_ID,
-    aws_secret_access_key=S3_SECRET_ACCESS_KEY
-)
-
-
-# ==========================================================
-# Vault Secret Loader
-# ==========================================================
-
-VAULT_ADDR = os.getenv(
-    "VAULT_ADDR",
-    "http://vault:8200"
-)
-
-VAULT_TOKEN = os.getenv(
-    "VAULT_TOKEN",
-    "versio-dev-root-token"
-)
-
-
-def get_vault_secret(secret_path: str, field: str) -> str:
-    """
-    Read a single field from Vault KV v2.
-    """
-
-    client = hvac.Client(
-        url=VAULT_ADDR,
-        token=VAULT_TOKEN
-    )
-
-    secret = client.secrets.kv.v2.read_secret_version(
-        path=secret_path,
-        mount_point="secret"
-    )
-
-    return secret["data"]["data"][field]
-
-
-# ==========================================================
-# OpenAI Configuration
-# ==========================================================
-
-OPENAI_API_KEY = get_vault_secret(
-    "versio/dev/openai",
-    "api_key"
-)
-
-IMAGE_GENERATION_MODE = os.getenv(
-    "IMAGE_GENERATION_MODE",
-    "mock"
-)
-
-OPENAI_IMAGE_MODEL = os.getenv(
-    "OPENAI_IMAGE_MODEL",
-    "gpt-image-1"
-)
-
-OPENAI_IMAGE_SIZE = os.getenv(
-    "OPENAI_IMAGE_SIZE",
-    "1024x1024"
-)
-
-OPENAI_IMAGE_QUALITY = os.getenv(
-    "OPENAI_IMAGE_QUALITY",
-    "low"
-)
-
-openai_client = OpenAI(
-    api_key=OPENAI_API_KEY
-)
-
-print("✓ OpenAI key loaded from Vault")
-
-
-# =====================================================
-# Helpers
-# =====================================================
-def ensure_bucket(bucket_name: str) -> None:
-    response = s3_client.list_buckets()
-    bucket_names = [bucket.get("Name") for bucket in response.get("Buckets", [])]
-
-    if bucket_name not in bucket_names:
-        s3_client.create_bucket(Bucket=bucket_name)
-
-
 def serialize_project(project: Project) -> dict:
     return {
         "project_id": project.project_id,
@@ -213,7 +219,7 @@ def serialize_project(project: Project) -> dict:
         "filename": project.filename,
         "content_type": project.content_type,
         "status": project.status,
-        "created_at": project.created_at.isoformat() + "Z"
+        "created_at": project.created_at.isoformat() + "Z",
     }
 
 
@@ -226,7 +232,7 @@ def serialize_storyboard_scene(scene: StoryboardScene) -> dict:
         "visual": scene.visual,
         "camera": scene.camera,
         "emotion": scene.emotion,
-        "created_at": scene.created_at.isoformat() + "Z"
+        "created_at": scene.created_at.isoformat() + "Z",
     }
 
 
@@ -240,52 +246,119 @@ def serialize_scene_image(image: SceneImage) -> dict:
         "prompt": image.prompt,
         "status": image.status,
         "created_at": image.created_at.isoformat() + "Z",
-        "download_url": f"/projects/{image.project_id}/images/{image.image_id}/download"
+        "download_url": f"/projects/{image.project_id}/images/{image.image_id}/download",
     }
 
 
 # =====================================================
-# Mock Storyboard Generator
-# Temporary storyboard generator until real AI planning
-# is added.
+# Storage Helper
 # =====================================================
-def mock_storyboard_scenes() -> list[dict]:
+def ensure_bucket(bucket_name: str) -> None:
+    response = s3_client.list_buckets()
+    bucket_names = [bucket.get("Name") for bucket in response.get("Buckets", [])]
+
+    if bucket_name not in bucket_names:
+        s3_client.create_bucket(Bucket=bucket_name)
+
+
+# =====================================================
+# Mock Storyboard Generator
+# Safe fallback when AI Director is disabled or fails.
+# =====================================================
+def mock_storyboard_scenes(
+    project_name: str = "Versio Project", story_prompt: str = ""
+) -> list[dict]:
     return [
         {
             "scene": 1,
             "title": "Opening Field",
             "visual": "Wide anime shot of a green grass field with horses running through flowers.",
             "camera": "slow cinematic push-in",
-            "emotion": "peaceful and hopeful"
+            "emotion": "peaceful and hopeful",
         },
         {
             "scene": 2,
             "title": "Ancient Kingdom",
             "visual": "Ancient stone buildings glowing under supernatural golden light.",
             "camera": "aerial reveal",
-            "emotion": "mystical and epic"
+            "emotion": "mystical and epic",
         },
         {
             "scene": 3,
             "title": "Conflict",
             "visual": "Two warriors clash with ancient magic and bright energy effects.",
             "camera": "fast cuts synced to beat",
-            "emotion": "intense but all-ages safe"
+            "emotion": "intense but all-ages safe",
         },
         {
             "scene": 4,
             "title": "Romantic Pause",
-            "visual": "Two characters share a soft kiss as flowers float in the wind.",
+            "visual": "Two characters share a soft emotional moment as flowers float in the wind.",
             "camera": "close-up with gentle fade out",
-            "emotion": "warm and emotional"
-        }
+            "emotion": "warm and emotional",
+        },
     ]
 
 
 # =====================================================
+# JSON Extraction Helper
+# Allows AI Director to return clean JSON even if the model
+# wraps the response in markdown by mistake.
+# =====================================================
+def parse_json_response(raw_text: str) -> dict:
+    cleaned = raw_text.strip()
+
+    if cleaned.startswith("```json"):
+        cleaned = cleaned.replace("```json", "", 1).strip()
+
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```", "", 1).strip()
+
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].strip()
+
+    return json.loads(cleaned)
+
+
+# =====================================================
+# AI Director
+# Delegates storyboard planning to the modular
+# AI Director service.
+# =====================================================
+def ai_director_storyboard(project: Project) -> list[dict]:
+    return generate_ai_director_storyboard(
+        openai_client=openai_client,
+        model=OPENAI_TEXT_MODEL,
+        project_name=project.project_name,
+        story_prompt=project.story_prompt,
+    )
+
+
+# =====================================================
+# Storyboard Router
+# Chooses AI Director or mock storyboard.
+# =====================================================
+def generate_storyboard_scenes(project: Project) -> list[dict]:
+    if AI_DIRECTOR_MODE != "openai":
+        return mock_storyboard_scenes(project.project_name, project.story_prompt)
+
+    try:
+        return ai_director_storyboard(project)
+    except Exception as exc:
+        print(f"WARNING: AI Director failed: {exc}")
+
+        if AI_DIRECTOR_FALLBACK_TO_MOCK:
+            print("WARNING: Falling back to mock storyboard scenes.")
+            return mock_storyboard_scenes(project.project_name, project.story_prompt)
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI Director failed: {str(exc)}",
+        )
+
+
+# =====================================================
 # Mock Image Fallback
-# Used when IMAGE_GENERATION_MODE is mock.
-# This keeps local development free and predictable.
 # =====================================================
 def placeholder_png_bytes() -> bytes:
     png_base64 = (
@@ -304,23 +377,15 @@ def placeholder_png_bytes() -> bytes:
 
 # =====================================================
 # OpenAI Image Generator
-# Converts a storyboard scene prompt into image bytes.
-# Returned bytes are stored in MinIO/S3.
 # =====================================================
 def openai_image_bytes(prompt: str) -> bytes:
-    if not openai_client:
-        raise HTTPException(
-            status_code=500,
-            detail="OPENAI_API_KEY is not configured."
-        )
-
     try:
         response = openai_client.images.generate(
             model=OPENAI_IMAGE_MODEL,
             prompt=prompt,
             size=OPENAI_IMAGE_SIZE,
             quality=OPENAI_IMAGE_QUALITY,
-            n=1
+            n=1,
         )
 
         image_base64 = response.data[0].b64_json
@@ -328,21 +393,22 @@ def openai_image_bytes(prompt: str) -> bytes:
         if not image_base64:
             raise HTTPException(
                 status_code=500,
-                detail="OpenAI did not return base64 image data."
+                detail="OpenAI did not return base64 image data.",
             )
 
         return base64.b64decode(image_base64)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"OpenAI image generation failed: {str(exc)}"
+            detail=f"OpenAI image generation failed: {str(exc)}",
         )
 
 
 # =====================================================
 # Image Generation Router
-# Chooses mock or OpenAI based on IMAGE_GENERATION_MODE.
 # =====================================================
 def generate_image_bytes(prompt: str) -> bytes:
     if IMAGE_GENERATION_MODE == "openai":
@@ -360,8 +426,10 @@ def root():
         "service": "versio-ai-studio-backend",
         "env": "dev",
         "status": "running",
-        "version": "0.7.0-dev",
-        "image_generation_mode": IMAGE_GENERATION_MODE
+        "version": "0.9.0-dev",
+        "image_generation_mode": IMAGE_GENERATION_MODE,
+        "ai_director_mode": AI_DIRECTOR_MODE,
+        "vault": "enabled",
     }
 
 
@@ -369,7 +437,9 @@ def root():
 def health():
     return {
         "status": "healthy",
-        "image_generation_mode": IMAGE_GENERATION_MODE
+        "image_generation_mode": IMAGE_GENERATION_MODE,
+        "ai_director_mode": AI_DIRECTOR_MODE,
+        "vault": "enabled",
     }
 
 
@@ -402,7 +472,6 @@ def get_project(project_id: str):
 
 # =====================================================
 # Audio Download
-# Streams original uploaded MP3/WAV from MinIO.
 # =====================================================
 @app.get("/projects/{project_id}/download")
 def download_project_audio(project_id: str):
@@ -416,17 +485,19 @@ def download_project_audio(project_id: str):
         try:
             response = s3_client.get_object(
                 Bucket=project.bucket,
-                Key=project.object_key
+                Key=project.object_key,
             )
         except ClientError:
-            raise HTTPException(status_code=404, detail="Audio file not found in object storage")
+            raise HTTPException(
+                status_code=404, detail="Audio file not found in object storage"
+            )
 
         return StreamingResponse(
             response["Body"],
             media_type=project.content_type or "application/octet-stream",
             headers={
                 "Content-Disposition": f'attachment; filename="{project.filename}"'
-            }
+            },
         )
     finally:
         db.close()
@@ -434,13 +505,12 @@ def download_project_audio(project_id: str):
 
 # =====================================================
 # Upload Song
-# Stores audio in MinIO and metadata in PostgreSQL.
 # =====================================================
 @app.post("/uploads/song")
 async def upload_song(
     project_name: str = Form(...),
     story_prompt: str = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
     ensure_bucket(S3_BUCKET_ASSETS)
 
@@ -451,19 +521,19 @@ async def upload_song(
     if not lower_filename.endswith(".mp3") and not lower_filename.endswith(".wav"):
         raise HTTPException(
             status_code=400,
-            detail="Only MP3 and WAV uploads are supported right now."
+            detail="Only MP3 and WAV uploads are supported right now.",
         )
 
-    file_ext = original_filename.rsplit(".", 1)[1] if "." in original_filename else "bin"
+    file_ext = (
+        original_filename.rsplit(".", 1)[1] if "." in original_filename else "bin"
+    )
     object_key = f"projects/{project_id}/audio/original.{file_ext}"
 
     s3_client.upload_fileobj(
         file.file,
         S3_BUCKET_ASSETS,
         object_key,
-        ExtraArgs={
-            "ContentType": file.content_type or "application/octet-stream"
-        }
+        ExtraArgs={"ContentType": file.content_type or "application/octet-stream"},
     )
 
     created_at = datetime.utcnow()
@@ -479,7 +549,7 @@ async def upload_song(
             filename=original_filename,
             content_type=file.content_type,
             status="uploaded",
-            created_at=created_at
+            created_at=created_at,
         )
 
         db.add(project)
@@ -497,13 +567,13 @@ async def upload_song(
         "filename": original_filename,
         "content_type": file.content_type,
         "created_at": created_at.isoformat() + "Z",
-        "download_url": f"/projects/{project_id}/download"
+        "download_url": f"/projects/{project_id}/download",
     }
 
 
 # =====================================================
 # Storyboard Generation
-# Saves storyboard scenes in PostgreSQL.
+# Uses AI Director when enabled.
 # =====================================================
 @app.post("/projects/{project_id}/storyboard")
 def generate_and_save_storyboard(project_id: str):
@@ -514,21 +584,24 @@ def generate_and_save_storyboard(project_id: str):
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        existing = db.query(StoryboardScene).filter(
-            StoryboardScene.project_id == project_id
-        ).order_by(StoryboardScene.scene_number.asc()).all()
+        existing = (
+            db.query(StoryboardScene)
+            .filter(StoryboardScene.project_id == project_id)
+            .order_by(StoryboardScene.scene_number.asc())
+            .all()
+        )
 
         if existing:
             return {
                 "project_id": project_id,
                 "project_name": project.project_name,
                 "status": "already_exists",
-                "storyboard": [serialize_storyboard_scene(scene) for scene in existing]
+                "storyboard": [serialize_storyboard_scene(scene) for scene in existing],
             }
 
         saved_scenes = []
 
-        for item in mock_storyboard_scenes():
+        for item in generate_storyboard_scenes(project):
             scene = StoryboardScene(
                 storyboard_id=str(uuid.uuid4()),
                 project_id=project_id,
@@ -537,7 +610,7 @@ def generate_and_save_storyboard(project_id: str):
                 visual=item["visual"],
                 camera=item["camera"],
                 emotion=item["emotion"],
-                created_at=datetime.utcnow()
+                created_at=datetime.utcnow(),
             )
             db.add(scene)
             saved_scenes.append(scene)
@@ -549,12 +622,13 @@ def generate_and_save_storyboard(project_id: str):
             "project_id": project_id,
             "project_name": project.project_name,
             "status": "storyboard_generated",
+            "ai_director_mode": AI_DIRECTOR_MODE,
             "storyboard": [serialize_storyboard_scene(scene) for scene in saved_scenes],
             "audio_direction": {
-                "fade_out": "Fade music down before romantic dialogue.",
-                "dialogue_insert": "Add soft spoken line during quiet break.",
-                "fade_in": "Bring music back smoothly into final scene."
-            }
+                "fade_out": "Fade music down before important story dialogue.",
+                "dialogue_insert": "Insert short spoken narration during the quiet break.",
+                "fade_in": "Bring music back smoothly into the next cinematic scene.",
+            },
         }
     finally:
         db.close()
@@ -569,15 +643,18 @@ def get_project_storyboard(project_id: str):
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        scenes = db.query(StoryboardScene).filter(
-            StoryboardScene.project_id == project_id
-        ).order_by(StoryboardScene.scene_number.asc()).all()
+        scenes = (
+            db.query(StoryboardScene)
+            .filter(StoryboardScene.project_id == project_id)
+            .order_by(StoryboardScene.scene_number.asc())
+            .all()
+        )
 
         return {
             "project_id": project_id,
             "project_name": project.project_name,
             "status": "found" if scenes else "empty",
-            "storyboard": [serialize_storyboard_scene(scene) for scene in scenes]
+            "storyboard": [serialize_storyboard_scene(scene) for scene in scenes],
         }
     finally:
         db.close()
@@ -585,8 +662,6 @@ def get_project_storyboard(project_id: str):
 
 # =====================================================
 # Scene Image Generation
-# Creates images from storyboard scene prompts.
-# Stores image binaries in MinIO and metadata in PostgreSQL.
 # =====================================================
 @app.post("/projects/{project_id}/images")
 def generate_scene_images(project_id: str):
@@ -599,26 +674,32 @@ def generate_scene_images(project_id: str):
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        existing = db.query(SceneImage).filter(
-            SceneImage.project_id == project_id
-        ).order_by(SceneImage.scene_number.asc()).all()
+        existing = (
+            db.query(SceneImage)
+            .filter(SceneImage.project_id == project_id)
+            .order_by(SceneImage.scene_number.asc())
+            .all()
+        )
 
         if existing:
             return {
                 "project_id": project_id,
                 "project_name": project.project_name,
                 "status": "already_exists",
-                "images": [serialize_scene_image(image) for image in existing]
+                "images": [serialize_scene_image(image) for image in existing],
             }
 
-        scenes = db.query(StoryboardScene).filter(
-            StoryboardScene.project_id == project_id
-        ).order_by(StoryboardScene.scene_number.asc()).all()
+        scenes = (
+            db.query(StoryboardScene)
+            .filter(StoryboardScene.project_id == project_id)
+            .order_by(StoryboardScene.scene_number.asc())
+            .all()
+        )
 
         if not scenes:
             raise HTTPException(
                 status_code=400,
-                detail="Generate storyboard before generating images."
+                detail="Generate storyboard before generating images.",
             )
 
         saved_images = []
@@ -643,7 +724,7 @@ def generate_scene_images(project_id: str):
                 Bucket=S3_BUCKET_ASSETS,
                 Key=object_key,
                 Body=image_bytes,
-                ContentType="image/png"
+                ContentType="image/png",
             )
 
             image = SceneImage(
@@ -653,8 +734,12 @@ def generate_scene_images(project_id: str):
                 bucket=S3_BUCKET_ASSETS,
                 object_key=object_key,
                 prompt=prompt,
-                status="generated_openai" if IMAGE_GENERATION_MODE == "openai" else "generated_mock",
-                created_at=datetime.utcnow()
+                status=(
+                    "generated_openai"
+                    if IMAGE_GENERATION_MODE == "openai"
+                    else "generated_mock"
+                ),
+                created_at=datetime.utcnow(),
             )
 
             db.add(image)
@@ -668,7 +753,7 @@ def generate_scene_images(project_id: str):
             "project_name": project.project_name,
             "status": "images_generated",
             "image_generation_mode": IMAGE_GENERATION_MODE,
-            "images": [serialize_scene_image(image) for image in saved_images]
+            "images": [serialize_scene_image(image) for image in saved_images],
         }
     finally:
         db.close()
@@ -683,15 +768,18 @@ def get_project_images(project_id: str):
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        images = db.query(SceneImage).filter(
-            SceneImage.project_id == project_id
-        ).order_by(SceneImage.scene_number.asc()).all()
+        images = (
+            db.query(SceneImage)
+            .filter(SceneImage.project_id == project_id)
+            .order_by(SceneImage.scene_number.asc())
+            .all()
+        )
 
         return {
             "project_id": project_id,
             "project_name": project.project_name,
             "status": "found" if images else "empty",
-            "images": [serialize_scene_image(image) for image in images]
+            "images": [serialize_scene_image(image) for image in images],
         }
     finally:
         db.close()
@@ -701,28 +789,31 @@ def get_project_images(project_id: str):
 def download_scene_image(project_id: str, image_id: str):
     db = SessionLocal()
     try:
-        image = db.query(SceneImage).filter(
-            SceneImage.project_id == project_id,
-            SceneImage.image_id == image_id
-        ).first()
+        image = (
+            db.query(SceneImage)
+            .filter(
+                SceneImage.project_id == project_id,
+                SceneImage.image_id == image_id,
+            )
+            .first()
+        )
 
         if not image:
             raise HTTPException(status_code=404, detail="Image not found")
 
         try:
-            response = s3_client.get_object(
-                Bucket=image.bucket,
-                Key=image.object_key
-            )
+            response = s3_client.get_object(Bucket=image.bucket, Key=image.object_key)
         except ClientError:
-            raise HTTPException(status_code=404, detail="Image file not found in object storage")
+            raise HTTPException(
+                status_code=404, detail="Image file not found in object storage"
+            )
 
         return StreamingResponse(
             response["Body"],
             media_type="image/png",
             headers={
                 "Content-Disposition": f'inline; filename="scene-{image.scene_number}.png"'
-            }
+            },
         )
     finally:
         db.close()
@@ -730,7 +821,6 @@ def download_scene_image(project_id: str, image_id: str):
 
 # =====================================================
 # Legacy Mock AI Test Endpoint
-# Kept for quick API testing.
 # =====================================================
 @app.post("/ai/test-generation")
 def test_ai_generation(request: AITestRequest):
@@ -739,12 +829,14 @@ def test_ai_generation(request: AITestRequest):
         "status": "mock_ai_generated",
         "input": {
             "song_description": request.song_description,
-            "story_prompt": request.story_prompt
+            "story_prompt": request.story_prompt,
         },
-        "storyboard": mock_storyboard_scenes(),
+        "storyboard": mock_storyboard_scenes(
+            request.project_name, request.story_prompt
+        ),
         "audio_direction": {
             "fade_out": "Fade music down before romantic dialogue.",
             "dialogue_insert": "Add soft spoken line during quiet break.",
-            "fade_in": "Bring music back smoothly into final scene."
-        }
+            "fade_in": "Bring music back smoothly into final scene.",
+        },
     }

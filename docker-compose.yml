@@ -76,9 +76,7 @@ services:
 
     environment:
       APP_ENV: dev
-
       DATABASE_URL: postgresql://versio:versio_dev_password@postgres:5432/versio_dev
-
       REDIS_URL: redis://redis:6379/0
 
       S3_ENDPOINT_URL: http://minio:9000
@@ -88,7 +86,7 @@ services:
       S3_BUCKET_EXPORTS: versio-dev-exports
 
       VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: versio-dev-root-token
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN}
 
       OPENAI_API_KEY: ${OPENAI_API_KEY}
 
