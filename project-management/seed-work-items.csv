@@ -1,0 +1,61 @@
+id,title,stream,sprint,status,priority,type,notes
+PM-001,Create Git repository and branch strategy,Platform Foundation,Sprint 0,Done,High,Task,Initial repo and branching flow established
+PM-002,Create Docker Compose development stack,Platform Foundation,Sprint 0,Done,High,Task,Core local platform created
+PM-003,Create FastAPI backend scaffold,Platform Foundation,Sprint 0,Done,High,Task,Backend running locally
+PM-004,Create Next.js frontend scaffold,Platform Foundation,Sprint 0,Done,High,Task,Frontend running locally
+PM-005,Add PostgreSQL service,Platform Foundation,Sprint 0,Done,High,Task,Metadata persistence database added
+PM-006,Add MinIO service,Platform Foundation,Sprint 0,Done,High,Task,Object storage added
+PM-007,Add Redis service,Platform Foundation,Sprint 0,Done,Medium,Task,Queue/cache foundation added
+PM-008,Add pgAdmin service,Platform Foundation,Sprint 0,Done,Medium,Task,Database UI added
+PM-009,Add Jenkins service,Platform Foundation,Sprint 0,Done,Medium,Task,CI/CD foundation added
+PM-010,Add RedisInsight service,Platform Foundation,Sprint 0,Done,Low,Task,Redis UI added
+PM-011,Upload MP3/WAV from frontend,Upload and Storage,Sprint 1,Done,High,Feature,User can upload audio
+PM-012,Store uploaded audio in MinIO,Upload and Storage,Sprint 1,Done,High,Feature,Audio stored under project object key
+PM-013,Store project metadata in PostgreSQL,Upload and Storage,Sprint 1,Done,High,Feature,Projects table created and populated
+PM-014,Download original audio,Upload and Storage,Sprint 1,Done,High,Feature,Download endpoint added
+PM-015,Add project details page,Product and UX,Sprint 1,Done,Medium,Feature,Project-specific UI page added
+PM-016,Create mock storyboard generator,Storyboard Engine,Sprint 2,Done,High,Feature,Initial storyboard generator added
+PM-017,Persist storyboard scenes,Storyboard Engine,Sprint 2,Done,High,Feature,Storyboards table added
+PM-018,Display storyboard in frontend,Storyboard Engine,Sprint 2,Done,High,Feature,Storyboard visible in project UI
+PM-019,Create scene images table,Image Generation,Sprint 3,Done,High,Feature,Scene image metadata persisted
+PM-020,Generate mock scene images,Image Generation,Sprint 3,Done,High,Feature,Placeholder image workflow added
+PM-021,Store images in MinIO,Image Generation,Sprint 3,Done,High,Feature,Images stored by project/scene
+PM-022,Display image gallery,Image Generation,Sprint 3,Done,High,Feature,Images visible in project UI
+PM-023,Add image download endpoint,Image Generation,Sprint 3,Done,Medium,Feature,Images downloadable from API
+PM-024,Add OpenAI image generation,Image Generation,Sprint 4,Done,High,Feature,Real image generation integrated
+PM-025,Add Vault service,Secrets and Security,Sprint 4,Done,High,Feature,Vault added to local stack
+PM-026,Store OpenAI key in Vault,Secrets and Security,Sprint 4,Done,High,Task,OpenAI secret path added
+PM-027,Backend reads OpenAI from Vault,Secrets and Security,Sprint 4,Done,High,Feature,OpenAI key loaded from Vault
+PM-028,Store service credentials in Vault,Secrets and Security,Sprint 4,Done,High,Task,Postgres Redis MinIO Jenkins stored
+PM-029,Backend reads core secrets from Vault,Secrets and Security,Sprint 4,Done,High,Feature,Backend secrets centralized
+PM-030,Add persistent Vault file storage,Secrets and Security,Sprint 4,Done,Urgent,Feature,Secrets survive container restart
+PM-031,Create Vault seed script,Secrets and Security,Sprint 4,Done,High,Task,Local restore automation added
+PM-032,Create AI Director service,Storyboard Engine,Sprint 4,Done,High,Feature,Modular AI Director service added
+PM-033,Document AI Director,Storyboard Engine,Sprint 4,Done,Medium,Task,docs/ai-director.md added
+PM-034,Create Timeline Builder service,Timeline Builder,Sprint 5,Done,High,Feature,Timeline Builder v1 service added
+PM-035,Add timeline API endpoint,Timeline Builder,Sprint 5,In Progress,High,Feature,GET project timeline endpoint being tested
+PM-036,Test timeline endpoint,Timeline Builder,Sprint 5,In Progress,High,Task,Backend health and timeline curl validation
+PM-037,Add timeline frontend section,Timeline Builder,Sprint 5,Todo,Medium,Feature,Show timeline on project details page
+PM-038,Persist timeline in PostgreSQL,Timeline Builder,Sprint 5,Todo,Medium,Feature,Add timeline table later
+PM-039,Create Character Memory service,Character Memory,Sprint 6,Todo,High,Feature,Create character identity service
+PM-040,Create character database table,Character Memory,Sprint 6,Todo,High,Feature,Persist character metadata
+PM-041,Extract characters from AI Director,Character Memory,Sprint 6,Todo,High,Feature,Use AI output to define characters
+PM-042,Inject character memory into prompts,Character Memory,Sprint 6,Todo,High,Feature,Improve visual consistency
+PM-043,Create Prompt Builder 2.0,Prompt Builder 2.0,Sprint 7,Todo,High,Feature,Central prompt generation
+PM-044,Add prompt versioning,Prompt Builder 2.0,Sprint 7,Todo,Medium,Feature,Track prompt outputs
+PM-045,Create image worker,Workers and Video Pipeline,Sprint 8,Todo,High,Feature,Move image generation to worker
+PM-046,Create FFmpeg worker,Workers and Video Pipeline,Sprint 8,Todo,High,Feature,Video composition foundation
+PM-047,Create Whisper worker,Workers and Video Pipeline,Sprint 8,Todo,Medium,Feature,Transcription support
+PM-048,Create Beat worker,Workers and Video Pipeline,Sprint 8,Todo,Medium,Feature,Beat detection support
+PM-049,Create first MP4 export,Workers and Video Pipeline,Sprint 9,Todo,High,Feature,Scene images plus audio to video
+PM-050,Add Terraform AWS modules,DevOps and Deployment,Sprint 10,Todo,High,Feature,AWS deployment foundation
+PM-051,Add Kubernetes manifests,DevOps and Deployment,Sprint 10,Todo,High,Feature,K8s deployment foundation
+PM-052,Add ArgoCD apps,DevOps and Deployment,Sprint 10,Todo,Medium,Feature,GitOps deployment
+PM-053,Add backend unit tests,QA and Hardening,Hardening,Todo,High,Task,Test backend logic
+PM-054,Add API integration tests,QA and Hardening,Hardening,Todo,High,Task,Test main endpoints
+PM-055,Add health check script,QA and Hardening,Hardening,Todo,Medium,Task,One-command local diagnostics
+PM-056,Improve Vault startup error handling,QA and Hardening,Hardening,Todo,High,Task,Avoid unclear backend crashes
+PM-057,Add customer-facing UI,Product and UX,Future,Todo,High,Feature,Separate user UI from developer dashboard
+PM-058,Add authentication,Product and UX,Future,Todo,High,Feature,User account system
+PM-059,Add billing and credits,Product and UX,Future,Todo,Medium,Feature,Usage-based product layer
+PM-060,Add agile dashboard tool,Product Management,Side Quest,In Progress,Medium,Feature,Evaluate Plane or OpenProject
