@@ -5,6 +5,7 @@ from datetime import datetime
 
 import boto3
 import hvac
+from app.orchestrator.project_pipeline import ProjectPipeline
 from app.services.timeline_builder import build_timeline_from_storyboard
 from botocore.exceptions import ClientError
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -581,6 +582,43 @@ def get_project_timeline(project_id: str):
             "project_name": project.project_name,
             **timeline,
         }
+    finally:
+        db.close()
+
+
+# =====================================================
+# Project Pipeline Snapshot
+# Builds a lightweight orchestration snapshot for the
+# current project without changing existing project data.
+# =====================================================
+@app.get("/projects/{project_id}/pipeline")
+def get_project_pipeline(project_id: str):
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.project_id == project_id).first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        scenes = (
+            db.query(StoryboardScene)
+            .filter(StoryboardScene.project_id == project_id)
+            .order_by(StoryboardScene.scene_number.asc())
+            .all()
+        )
+
+        storyboard_scenes = [serialize_storyboard_scene(scene) for scene in scenes]
+
+        pipeline = ProjectPipeline(
+            project_id=project.project_id,
+            project_name=project.project_name,
+            story_prompt=project.story_prompt,
+        )
+
+        pipeline.load_storyboard(storyboard_scenes)
+        pipeline.build_timeline()
+
+        return pipeline.snapshot()
     finally:
         db.close()
 

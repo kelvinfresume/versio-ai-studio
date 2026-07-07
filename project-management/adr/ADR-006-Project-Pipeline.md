@@ -1,15 +1,16 @@
 # ADR-006 — Project Pipeline Orchestrator
 
-Status: Proposed
+Status: Accepted
 
 ## Context
 
-main.py should not coordinate AI Director, Timeline Builder, Character Memory, Prompt Builder, workers, and exports.
+Versio now has multiple backend stages: AI Director, Timeline Builder, image generation, and future Character Memory, Prompt Builder, workers, and exports.
+
+Keeping orchestration inside `main.py` would make the backend harder to maintain.
 
 ## Decision
 
-Create a Project Pipeline orchestration layer.
+Create a Project Pipeline Orchestrator under:
 
-## Consequences
-
-Future AI and media services plug into one pipeline instead of spreading orchestration logic across route handlers.
+```text
+backend/fastapi-api/app/orchestrator/
